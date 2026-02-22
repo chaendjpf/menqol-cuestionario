@@ -617,6 +617,8 @@ export default function App() {
         : { present: false, rating: null }
     }))
     setAnswers(rand)
+    setAge(String(Math.floor(Math.random() * 21) + 45))   // 45-65
+    setWeight(String(Math.floor(Math.random() * 31) + 55)) // 55-85 kg
     setStep("results")
     scrollTop()
   }
