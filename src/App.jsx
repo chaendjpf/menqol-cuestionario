@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { DOMAINS } from './data.js'
 import { supabase } from './supabase.js'
 import Dashboard from './Dashboard.jsx'
+import AboutPage from './AboutPage.jsx'
 import './styles.css'
 
 /* ─── Helpers ─── */
@@ -723,6 +724,12 @@ export default function App() {
               background: "white", color: "#94A3B8", border: "1.5px solid #E2E8F0",
               fontSize: 13, fontWeight: 600, cursor: "pointer"
             }}>📊 Dashboard investigación</button>
+            <button onClick={() => setStep("about")} style={{
+              width: "100%", padding: 12, marginTop: 14,
+              background: "none", color: "#94A3B8", border: "none",
+              fontSize: 13, fontWeight: 500, cursor: "pointer",
+              textDecoration: "underline", textUnderlineOffset: 3
+            }}>ℹ️ Cómo funciona esta app</button>
           </div>
         )}
 
@@ -831,6 +838,11 @@ export default function App() {
       {/* ── DASHBOARD (full-width, outside container) ── */}
       {step === "dashboard" && (
         <Dashboard onBack={() => setStep("intro")} />
+      )}
+
+      {/* ── ABOUT PAGE ── */}
+      {step === "about" && (
+        <AboutPage onBack={() => { setStep("intro"); scrollTop() }} />
       )}
 
       {/* Tooltip bottom sheet (portal-like) */}
