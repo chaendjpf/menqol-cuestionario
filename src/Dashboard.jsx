@@ -3,7 +3,7 @@ import { supabase } from './supabase.js'
 import { DOMAINS } from './data.js'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer
+  Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts'
 
 /* ─── Constants ─── */
@@ -16,9 +16,11 @@ const REFERENCE = {
 
 const TABS = [
   { id: 'resumen', label: 'Resumen' },
-  { id: 'demografia', label: 'Demografía' },
+  { id: 'muestra', label: 'Muestra' },
   { id: 'dominios', label: 'Dominios' },
   { id: 'items', label: 'Ítems' },
+  { id: 'ipaq', label: 'IPAQ' },
+  { id: 'analisis', label: 'Análisis' },
   { id: 'edad', label: 'Por edad' },
   { id: 'gestion', label: 'Gestión' },
 ]
@@ -38,6 +40,57 @@ const DOMAIN_META = DOMAINS.map(d => ({
   emoji: d.emoji, color: d.color, items: d.items,
 }))
 
+/* ─── Label maps ─── */
+const STAGE_LABELS = {
+  premenopause: 'Premenopausia',
+  early_perimenopause: 'Perimenopausia temprana',
+  late_perimenopause: 'Perimenopausia tardía',
+  postmenopause: 'Postmenopausia',
+  surgical_menopause: 'Menopausia quirúrgica',
+  unknown: 'No determinada',
+}
+const STAGE_COLORS = {
+  premenopause: '#22C55E',
+  early_perimenopause: '#F59E0B',
+  late_perimenopause: '#F97316',
+  postmenopause: '#EF4444',
+  surgical_menopause: '#8B5CF6',
+  unknown: '#94A3B8',
+}
+const STAGE_ORDER = ['premenopause', 'early_perimenopause', 'late_perimenopause', 'postmenopause', 'surgical_menopause', 'unknown']
+
+const IPAQ_LABELS = { low: 'Bajo', moderate: 'Moderado', high: 'Alto' }
+const IPAQ_COLORS = { low: '#EF4444', moderate: '#F59E0B', high: '#22C55E' }
+const IPAQ_ORDER = ['low', 'moderate', 'high']
+
+const VERSION_LABELS = { full: 'Completa', quick: 'Rápida', legacy: 'Legacy' }
+const VERSION_COLORS = { full: '#7C9CE8', quick: '#22C55E', legacy: '#94A3B8' }
+
+const MARITAL_LABELS = {
+  single: 'Soltera', married: 'Casada/pareja', divorced: 'Divorciada/separada',
+  widowed: 'Viuda', other: 'Otro',
+}
+const EDUCATION_LABELS = {
+  primary: 'Primaria', secondary: 'Secundaria', vocational: 'FP',
+  university: 'Universidad', postgrad: 'Postgrado', other: 'Otro',
+}
+const EMPLOYMENT_LABELS = {
+  employed: 'Empleada', unemployed: 'Desempleada', retired: 'Jubilada',
+  homemaker: 'Ama de casa', student: 'Estudiante', disability: 'Incapacidad', other: 'Otro',
+}
+const ETHNICITY_LABELS = {
+  caucasian: 'Caucásica', hispanic: 'Hispana', african: 'Africana',
+  asian: 'Asiática', mixed: 'Mixta', other: 'Otra',
+}
+
+const SMOKING_LABELS = { never: 'Nunca', former: 'Exfumadora', current: 'Fumadora activa' }
+const THM_LABELS = { never: 'Nunca', past: 'Pasado', current: 'Actual' }
+const DEPRESSION_LABELS = { no: 'No', past: 'Pasada', current: 'Actual' }
+const ALCOHOL_LABELS = { never: 'Nunca', monthly: 'Mensual', weekly: 'Semanal', daily: 'Diario' }
+
+const BMI_CATS = ['Bajo peso', 'Normopeso', 'Sobrepeso', 'Obesidad']
+const BMI_COLORS = { 'Bajo peso': '#60A5FA', 'Normopeso': '#22C55E', 'Sobrepeso': '#F59E0B', 'Obesidad': '#EF4444' }
+
 /* ─── Stats helpers ─── */
 const avg = (arr) => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0
 const sd = (arr) => {
@@ -56,12 +109,151 @@ const histogram = (values, binSize, min, max) => {
   return bins
 }
 
+/** Count frequencies for categorical variable */
+const distrib = (arr, accessor, labels, order) => {
+  const counts = {}
+  arr.forEach(item => {
+    const val = typeof accessor === 'function' ? accessor(item) : item[accessor]
+    if (val != null && val !== '') counts[val] = (counts[val] || 0) + 1
+  })
+  const total = arr.length
+  const keys = order || Object.keys(counts).sort((a, b) => (counts[b] || 0) - (counts[a] || 0))
+  return keys
+    .filter(k => counts[k] > 0)
+    .map(k => ({
+      key: k,
+      label: (labels && labels[k]) || k,
+      count: counts[k] || 0,
+      pct: total ? ((counts[k] || 0) / total * 100) : 0,
+    }))
+}
+
 /* ─── Shared styles ─── */
 const card = {
   background: "white", borderRadius: 16, padding: 16,
   border: "1.5px solid #F1F5F9", marginBottom: 14
 }
 const sectionTitle = { fontSize: 14, fontWeight: 700, color: "#1E293B", marginBottom: 12 }
+
+/* ─── Reusable: HBar (CSS horizontal bars) ─── */
+function HBar({ data, color = '#7C9CE8', maxPct }) {
+  const maxVal = maxPct || Math.max(...data.map(d => d.pct), 1)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {data.map(d => (
+        <div key={d.key || d.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+          <span style={{ width: 130, flexShrink: 0, color: '#475569', textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {d.label}
+          </span>
+          <div style={{ flex: 1, background: '#F1F5F9', borderRadius: 4, height: 18, position: 'relative' }}>
+            <div style={{
+              width: `${Math.min(d.pct / maxVal * 100, 100)}%`,
+              background: d.color || color, borderRadius: 4, height: '100%', minWidth: d.pct > 0 ? 2 : 0,
+              transition: 'width 0.3s ease',
+            }} />
+          </div>
+          <span style={{ width: 70, flexShrink: 0, color: '#64748B', fontSize: 11, whiteSpace: 'nowrap' }}>
+            {d.count} ({d.pct.toFixed(1)}%)
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ─── Reusable: MiniDonut ─── */
+function MiniDonut({ data, colors, title }) {
+  const total = data.reduce((s, d) => s + d.value, 0)
+  return (
+    <div style={{ ...card, padding: 12, flex: 1, minWidth: 180 }}>
+      <p style={{ fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4, textAlign: 'center' }}>{title}</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <PieChart width={90} height={90}>
+          <Pie data={data} cx={42} cy={42} innerRadius={22} outerRadius={38} dataKey="value" strokeWidth={0}>
+            {data.map((d, i) => <Cell key={i} fill={colors[d.name] || colors[i] || '#CBD5E1'} />)}
+          </Pie>
+        </PieChart>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {data.map((d, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#64748B' }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: colors[d.name] || colors[i] || '#CBD5E1', flexShrink: 0 }} />
+              <span>{d.label}: {d.value} ({total ? (d.value / total * 100).toFixed(0) : 0}%)</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Reusable: CrossTab (MENQOL stratified by variable) ─── */
+function CrossTab({ title, groups, enriched }) {
+  const results = groups.map(g => {
+    const subset = enriched.filter(g.filter)
+    const n = subset.length
+    if (!n) return { ...g, n: 0, vasomotor: 0, psychosocial: 0, physical: 0, sexual: 0, global: 0 }
+    return {
+      ...g, n,
+      vasomotor: avg(subset.map(r => r.score_vasomotor).filter(v => v != null)),
+      psychosocial: avg(subset.map(r => r.score_psychosocial).filter(v => v != null)),
+      physical: avg(subset.map(r => r.score_physical).filter(v => v != null)),
+      sexual: avg(subset.map(r => r.score_sexual).filter(v => v != null)),
+      global: avg(subset.map(r => r.score_global).filter(v => v != null)),
+    }
+  }).filter(g => g.n > 0)
+
+  if (!results.length) return (
+    <div style={card}>
+      <p style={sectionTitle}>{title}</p>
+      <p style={{ fontSize: 13, color: '#94A3B8' }}>Sin datos suficientes para este análisis.</p>
+    </div>
+  )
+
+  return (
+    <div style={card}>
+      <p style={sectionTitle}>{title}</p>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', minWidth: 500 }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #E2E8F0' }}>
+              <th style={{ textAlign: 'left', padding: 6, color: '#475569' }}>Grupo</th>
+              <th style={{ textAlign: 'right', padding: 6, color: '#475569' }}>n</th>
+              <th style={{ textAlign: 'right', padding: 6, color: '#E8927C' }}>Vasomotor</th>
+              <th style={{ textAlign: 'right', padding: 6, color: '#9C7CE8' }}>Psicosocial</th>
+              <th style={{ textAlign: 'right', padding: 6, color: '#7CC8A8' }}>Físico</th>
+              <th style={{ textAlign: 'right', padding: 6, color: '#E87CA8' }}>Sexual</th>
+              <th style={{ textAlign: 'right', padding: 6, color: '#475569', fontWeight: 700 }}>Global</th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.map(g => (
+              <tr key={g.label} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                <td style={{ padding: 6, fontWeight: 600 }}>{g.label}</td>
+                <td style={{ padding: 6, textAlign: 'right', color: '#94A3B8' }}>{g.n}</td>
+                <td style={{ padding: 6, textAlign: 'right' }}>{g.vasomotor.toFixed(2)}</td>
+                <td style={{ padding: 6, textAlign: 'right' }}>{g.psychosocial.toFixed(2)}</td>
+                <td style={{ padding: 6, textAlign: 'right' }}>{g.physical.toFixed(2)}</td>
+                <td style={{ padding: 6, textAlign: 'right' }}>{g.sexual.toFixed(2)}</td>
+                <td style={{ padding: 6, textAlign: 'right', fontWeight: 700 }}>{g.global.toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={results.map(g => ({ name: g.label, Global: +g.global.toFixed(2) }))}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+            <XAxis dataKey="name" fontSize={10} tick={{ fill: '#64748B' }} interval={0} angle={-20} textAnchor="end" height={50} />
+            <YAxis domain={[0, 8]} fontSize={10} tick={{ fill: '#94A3B8' }} />
+            <Tooltip />
+            <Bar dataKey="Global" fill="#7C9CE8" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
 
 /* ─── Login ─── */
 function LoginForm({ onLogin }) {
@@ -121,10 +313,11 @@ function Kpi({ label, value, sub }) {
   )
 }
 
-/* ─── Filter Bar ─── */
+/* ─── Filter Bar (enhanced) ─── */
 function FilterBar({ filters, onChange, total }) {
   const input = { padding: "6px 10px", borderRadius: 8, border: "1.5px solid #E2E8F0", fontSize: 12, width: 70, outline: "none" }
   const dateInput = { ...input, width: 120 }
+  const selectInput = { ...input, width: 'auto', minWidth: 90, cursor: 'pointer' }
   const set = (key, val) => onChange({ ...filters, [key]: val || undefined })
 
   return (
@@ -150,6 +343,32 @@ function FilterBar({ filters, onChange, total }) {
         <input type="date" value={filters.dateFrom || ""} onChange={e => set("dateFrom", e.target.value)} style={dateInput} />
         <span>–</span>
         <input type="date" value={filters.dateTo || ""} onChange={e => set("dateTo", e.target.value)} style={dateInput} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#64748B" }}>
+        Versión
+        <select value={filters.version || ""} onChange={e => set("version", e.target.value)} style={selectInput}>
+          <option value="">Todas</option>
+          <option value="full">Completa</option>
+          <option value="quick">Rápida</option>
+        </select>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#64748B" }}>
+        Etapa
+        <select value={filters.stage || ""} onChange={e => set("stage", e.target.value)} style={selectInput}>
+          <option value="">Todas</option>
+          {STAGE_ORDER.filter(s => s !== 'unknown').map(s => (
+            <option key={s} value={s}>{STAGE_LABELS[s]}</option>
+          ))}
+        </select>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#64748B" }}>
+        IPAQ
+        <select value={filters.ipaq || ""} onChange={e => set("ipaq", e.target.value)} style={selectInput}>
+          <option value="">Todos</option>
+          {IPAQ_ORDER.map(c => (
+            <option key={c} value={c}>{IPAQ_LABELS[c]}</option>
+          ))}
+        </select>
       </div>
       <span style={{
         fontSize: 12, fontWeight: 700, color: "#7C9CE8",
@@ -222,18 +441,74 @@ export default function Dashboard({ onBack }) {
       })
   }, [user])
 
-  // Apply filters
+  // ─── Enriched data ───
+  const enriched = useMemo(() => rawData.map(r => {
+    const ans = r.answers || {}
+    const h = ans._basics?.height
+    const bmi = r.weight && h > 100 ? r.weight / ((h / 100) ** 2) : null
+    const bmiRound = bmi ? Math.round(bmi * 10) / 10 : null
+
+    // Merge smoking from full _habits or quick _quickHealth
+    const smoking = ans._habits?.smoking || ans._quickHealth?.smoking || null
+    // Merge depression
+    const depression = ans._health?.depression || ans._health?.anxiety_dx
+      ? (ans._health?.depression === 'current' || ans._health?.anxiety_dx === 'current' ? 'current'
+        : ans._health?.depression || 'no')
+      : (ans._quickHealth?.depression || null)
+    // THM from either source
+    const thm = ans._gynecology?.thm || ans._health?.thm || ans._quickHealth?.thm || null
+    // HTA from either source
+    const hta = ans._health?.hta || ans._quickHealth?.hta || null
+
+    // IPAQ sitting minutes (from _ipaq answers)
+    const ipaqSitting = ans._ipaq?.sitting_hours != null
+      ? ans._ipaq.sitting_hours * 60 + (ans._ipaq.sitting_minutes || 0)
+      : (ans._ipaq?.sitting_min ?? null)
+
+    return {
+      ...r,
+      version: ans._version || 'legacy',
+      stage: ans._reproductiveStage || null,
+      ipaqCat: ans._ipaqScore?.category || null,
+      ipaqMet: ans._ipaqScore?.totalMET ?? null,
+      ipaqSitting,
+      bmi: bmiRound,
+      bmiCat: bmiRound == null ? null
+        : bmiRound < 18.5 ? 'Bajo peso'
+        : bmiRound < 25 ? 'Normopeso'
+        : bmiRound < 30 ? 'Sobrepeso'
+        : 'Obesidad',
+      height: h || null,
+      smoking,
+      depression,
+      thm,
+      hta,
+      alcoholFreq: ans._habits?.alcoholFreq || null,
+      maritalStatus: ans._demographics?.maritalStatus || null,
+      education: ans._demographics?.education || null,
+      employment: ans._demographics?.employment || null,
+      ethnicity: ans._demographics?.ethnicity || null,
+      menarche: ans._gynecology?.menarche || null,
+      pregnancies: ans._gynecology?.pregnancies ?? null,
+      health: ans._health || {},
+    }
+  }), [rawData])
+
+  // Apply filters (including new ones)
   const data = useMemo(() => {
-    return rawData.filter(r => {
+    return enriched.filter(r => {
       if (filters.ageMin && r.age < parseInt(filters.ageMin)) return false
       if (filters.ageMax && r.age > parseInt(filters.ageMax)) return false
       if (filters.weightMin && r.weight < parseFloat(filters.weightMin)) return false
       if (filters.weightMax && r.weight > parseFloat(filters.weightMax)) return false
       if (filters.dateFrom && r.created_at < filters.dateFrom) return false
       if (filters.dateTo && r.created_at > filters.dateTo + "T23:59:59") return false
+      if (filters.version && r.version !== filters.version) return false
+      if (filters.stage && r.stage !== filters.stage) return false
+      if (filters.ipaq && r.ipaqCat !== filters.ipaq) return false
       return true
     })
-  }, [rawData, filters])
+  }, [enriched, filters])
 
   const handleLogin = () => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -263,7 +538,11 @@ export default function Dashboard({ onBack }) {
   const exportCSV = () => {
     const items = DOMAINS.flatMap(d => d.items)
     const headers = [
-      'id', 'fecha', 'edad', 'peso', 'version', 'escala', 'etapa_reproductiva', 'ipaq_categoria', 'ipaq_met',
+      'id', 'fecha', 'edad', 'peso', 'talla', 'imc', 'imc_categoria',
+      'version', 'escala', 'etapa_reproductiva',
+      'estado_civil', 'educacion', 'empleo', 'etnia',
+      'tabaco', 'alcohol_freq', 'thm', 'depresion', 'hta',
+      'ipaq_categoria', 'ipaq_met', 'ipaq_sitting_min',
       'score_vasomotor', 'score_psicosocial', 'score_fisico', 'score_sexual', 'score_global',
       ...items.map(i => `item_${i.id}`)
     ]
@@ -274,17 +553,27 @@ export default function Dashboard({ onBack }) {
         r.id,
         new Date(r.created_at).toLocaleDateString("es-ES"),
         r.age ?? '', r.weight ?? '',
-        ans._version || 'legacy',
+        r.height ?? '', r.bmi ?? '', r.bmiCat ?? '',
+        r.version,
         scale,
-        ans._reproductiveStage || '',
-        ans._ipaqScore?.category || '',
-        ans._ipaqScore?.totalMET || '',
+        r.stage ? (STAGE_LABELS[r.stage] || r.stage) : '',
+        r.maritalStatus ? (MARITAL_LABELS[r.maritalStatus] || r.maritalStatus) : '',
+        r.education ? (EDUCATION_LABELS[r.education] || r.education) : '',
+        r.employment ? (EMPLOYMENT_LABELS[r.employment] || r.employment) : '',
+        r.ethnicity ? (ETHNICITY_LABELS[r.ethnicity] || r.ethnicity) : '',
+        r.smoking ? (SMOKING_LABELS[r.smoking] || r.smoking) : '',
+        r.alcoholFreq ? (ALCOHOL_LABELS[r.alcoholFreq] || r.alcoholFreq) : '',
+        r.thm ? (THM_LABELS[r.thm] || r.thm) : '',
+        r.depression ? (DEPRESSION_LABELS[r.depression] || r.depression) : '',
+        r.hta ?? '',
+        r.ipaqCat ? (IPAQ_LABELS[r.ipaqCat] || r.ipaqCat) : '',
+        r.ipaqMet ?? '',
+        r.ipaqSitting ?? '',
         r.score_vasomotor, r.score_psychosocial, r.score_physical, r.score_sexual, r.score_global,
         ...items.map(i => {
           const a = ans[String(i.id)]
           if (!a?.present) return 1
           if (a.rating == null) return 1
-          // Convert 0-6 to internal 1-8 for CSV consistency
           return scale === '0-6' ? a.rating + 2 : a.rating
         })
       ]
@@ -303,8 +592,8 @@ export default function Dashboard({ onBack }) {
 
   // ─── Computed stats ───
   const ages = data.filter(r => r.age).map(r => r.age)
-  const weights = data.filter(r => r.weight).map(r => r.weight)
   const globals = data.map(r => r.score_global)
+  const bmis = data.filter(r => r.bmi).map(r => r.bmi)
 
   const weeklyData = useMemo(() => {
     const weeks = {}
@@ -337,7 +626,6 @@ export default function Dashboard({ onBack }) {
     DOMAINS.flatMap(d => d.items.map(item => {
       const vals = data.map(r => r.answers?.[String(item.id)])
       const presentCount = vals.filter(v => v?.present).length
-      // Handle both 0-6 and 2-8 scales: normalize to internal 1-8
       const ratings = vals.filter(v => v?.present && v?.rating != null).map(v => {
         const scale = data.find(r => r.answers?.[String(item.id)] === v)?.answers?._scale
         return scale === '0-6' ? v.rating + 2 : v.rating
@@ -417,26 +705,51 @@ export default function Dashboard({ onBack }) {
 
       {/* ═══ TAB: RESUMEN ═══ */}
       {tab === 'resumen' && <>
+        {/* KPI row 1 */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <Kpi label="Respuestas" value={data.length} />
           <Kpi label="Edad media" value={ages.length ? avg(ages).toFixed(0) : "—"} sub={ages.length ? `SD ${sd(ages).toFixed(1)}` : ""} />
-          <Kpi label="Peso medio" value={weights.length ? avg(weights).toFixed(0) + " kg" : "—"} sub={weights.length ? `SD ${sd(weights).toFixed(1)}` : ""} />
+          <Kpi label="IMC medio" value={bmis.length ? avg(bmis).toFixed(1) : "—"} sub={bmis.length ? `SD ${sd(bmis).toFixed(1)}` : ""} />
           <Kpi label="Score global" value={globals.length ? avg(globals).toFixed(2) : "—"} sub={globals.length ? `SD ${sd(globals).toFixed(2)} / 8` : ""} />
         </div>
-        {/* Version breakdown */}
-        {(() => {
-          const fullCount = data.filter(r => r.answers?._version === 'full').length
-          const quickCount = data.filter(r => r.answers?._version === 'quick').length
-          const legacyCount = data.length - fullCount - quickCount
-          return (fullCount > 0 || quickCount > 0) ? (
-            <div style={{ ...card, display: "flex", gap: 10, padding: "10px 14px", marginBottom: 14 }}>
-              <span style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>Versiones:</span>
-              {fullCount > 0 && <span style={{ fontSize: 12, color: "#7C9CE8", background: "#EEF2FF", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>Completa: {fullCount}</span>}
-              {quickCount > 0 && <span style={{ fontSize: 12, color: "#22C55E", background: "#F0FDF4", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>Rápida: {quickCount}</span>}
-              {legacyCount > 0 && <span style={{ fontSize: 12, color: "#94A3B8", background: "#F8FAFC", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>Legacy: {legacyCount}</span>}
-            </div>
-          ) : null
-        })()}
+
+        {/* KPI row 2: Mini donuts */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          {(() => {
+            const versionDist = distrib(data, 'version', VERSION_LABELS, ['full', 'quick', 'legacy'])
+            return versionDist.length > 0 ? (
+              <MiniDonut
+                title="Versión"
+                data={versionDist.map(d => ({ name: d.key, label: d.label, value: d.count }))}
+                colors={VERSION_COLORS}
+              />
+            ) : null
+          })()}
+          {(() => {
+            const stageData = data.filter(r => r.stage)
+            if (!stageData.length) return null
+            const stageDist = distrib(stageData, 'stage', STAGE_LABELS, STAGE_ORDER)
+            return (
+              <MiniDonut
+                title="Etapa reproductiva"
+                data={stageDist.map(d => ({ name: d.key, label: d.label, value: d.count }))}
+                colors={STAGE_COLORS}
+              />
+            )
+          })()}
+          {(() => {
+            const ipaqData = data.filter(r => r.ipaqCat)
+            if (!ipaqData.length) return null
+            const ipaqDist = distrib(ipaqData, 'ipaqCat', IPAQ_LABELS, IPAQ_ORDER)
+            return (
+              <MiniDonut
+                title="IPAQ"
+                data={ipaqDist.map(d => ({ name: d.key, label: d.label, value: d.count }))}
+                colors={IPAQ_COLORS}
+              />
+            )
+          })()}
+        </div>
 
         <div style={card}>
           <p style={sectionTitle}>Respuestas por semana</p>
@@ -465,64 +778,186 @@ export default function Dashboard({ onBack }) {
         </div>
       </>}
 
-      {/* ═══ TAB: DEMOGRAFÍA ═══ */}
-      {tab === 'demografia' && <>
-        <div style={card}>
-          <p style={sectionTitle}>Distribución de edad (n={ages.length})</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={histogram(ages, 5, 40, 75)}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-              <XAxis dataKey="label" fontSize={11} tick={{ fill: "#94A3B8" }} />
-              <YAxis fontSize={10} tick={{ fill: "#94A3B8" }} allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="count" name="n" fill="#E8927C" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+      {/* ═══ TAB: MUESTRA ═══ */}
+      {tab === 'muestra' && <>
+        {/* 1. Etapa reproductiva */}
+        {(() => {
+          const stageData = data.filter(r => r.stage)
+          if (!stageData.length) return null
+          const stageDist = distrib(stageData, 'stage', STAGE_LABELS, STAGE_ORDER)
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Etapa reproductiva (n={stageData.length})</p>
+              <HBar data={stageDist.map(d => ({ ...d, color: STAGE_COLORS[d.key] }))} />
+            </div>
+          )
+        })()}
 
-        <div style={card}>
-          <p style={sectionTitle}>Distribución de peso (n={weights.length})</p>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={histogram(weights, 5, 45, 100)}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-              <XAxis dataKey="label" fontSize={11} tick={{ fill: "#94A3B8" }} />
-              <YAxis fontSize={10} tick={{ fill: "#94A3B8" }} allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="count" name="n" fill="#7CC8A8" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        {/* 2. IMC */}
+        {(() => {
+          const bmiData = data.filter(r => r.bmi != null)
+          if (!bmiData.length) return null
+          const bmiCatDist = distrib(bmiData, 'bmiCat', null, BMI_CATS)
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Índice de Masa Corporal (n={bmiData.length})</p>
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={histogram(bmiData.map(r => r.bmi), 2, 16, 42)}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="label" fontSize={10} tick={{ fill: "#94A3B8" }} />
+                  <YAxis fontSize={10} tick={{ fill: "#94A3B8" }} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="n" fill="#7C9CE8" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              <div style={{ marginTop: 12 }}>
+                <HBar data={bmiCatDist.map(d => ({ ...d, color: BMI_COLORS[d.key] || '#94A3B8' }))} />
+              </div>
+            </div>
+          )
+        })()}
 
-        <div style={card}>
-          <p style={sectionTitle}>Muestra por grupo de edad</p>
-          <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: "2px solid #E2E8F0" }}>
-                <th style={{ textAlign: "left", padding: 6, color: "#475569" }}>Grupo</th>
-                <th style={{ textAlign: "right", padding: 6, color: "#475569" }}>n</th>
-                <th style={{ textAlign: "right", padding: 6, color: "#475569" }}>%</th>
-                <th style={{ textAlign: "right", padding: 6, color: "#475569" }}>Score global</th>
-              </tr>
-            </thead>
-            <tbody>
-              {AGE_GROUPS.map(g => {
-                const gd = data.filter(r => getAgeGroup(r.age) === g)
-                return (
-                  <tr key={g} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                    <td style={{ padding: 6, fontWeight: 600 }}>{g}</td>
-                    <td style={{ padding: 6, textAlign: "right" }}>{gd.length}</td>
-                    <td style={{ padding: 6, textAlign: "right", color: "#94A3B8" }}>
-                      {data.length ? (gd.length / data.length * 100).toFixed(1) + "%" : "—"}
-                    </td>
-                    <td style={{ padding: 6, textAlign: "right" }}>
-                      {gd.length ? avg(gd.map(r => r.score_global)).toFixed(2) : "—"}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        {/* 3. Demografía (solo full) */}
+        {(() => {
+          const fullData = data.filter(r => r.version === 'full')
+          if (!fullData.length) return null
+          const hasDemo = fullData.some(r => r.maritalStatus || r.education || r.employment || r.ethnicity)
+          if (!hasDemo) return null
+          const demos = [
+            { title: 'Estado civil', accessor: 'maritalStatus', labels: MARITAL_LABELS },
+            { title: 'Educación', accessor: 'education', labels: EDUCATION_LABELS },
+            { title: 'Empleo', accessor: 'employment', labels: EMPLOYMENT_LABELS },
+            { title: 'Etnia', accessor: 'ethnicity', labels: ETHNICITY_LABELS },
+          ]
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Demografía (versión completa, n={fullData.length})</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                {demos.map(d => {
+                  const withVal = fullData.filter(r => r[d.accessor])
+                  if (!withVal.length) return null
+                  const dist = distrib(withVal, d.accessor, d.labels)
+                  return (
+                    <div key={d.accessor}>
+                      <p style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>{d.title}</p>
+                      <HBar data={dist} color="#9C7CE8" />
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* 4. Salud (merged full+quick) */}
+        {(() => {
+          const conditions = [
+            { key: 'hta', label: 'Hipertensión' },
+            { key: 'diabetes', label: 'Diabetes' },
+            { key: 'dyslipidemia', label: 'Dislipemia' },
+            { key: 'thyroid', label: 'Tiroides' },
+            { key: 'depression', label: 'Depresión' },
+            { key: 'osteoporosis', label: 'Osteoporosis' },
+            { key: 'arthrosis', label: 'Artrosis' },
+            { key: 'arthritis', label: 'Artritis' },
+          ]
+          const healthData = conditions.map(c => {
+            // Count positive cases: true, 'yes', 'current', 'past'
+            const positive = data.filter(r => {
+              const val = r.health?.[c.key] ?? r[c.key]
+              return val === true || val === 'yes' || val === 'current' || val === 'past'
+            }).length
+            return { key: c.key, label: c.label, count: positive, pct: data.length ? (positive / data.length * 100) : 0 }
+          }).filter(d => d.count > 0).sort((a, b) => b.count - a.count)
+
+          if (!healthData.length) return null
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Prevalencia de condiciones de salud (n={data.length})</p>
+              <HBar data={healthData} color="#E8927C" maxPct={100} />
+            </div>
+          )
+        })()}
+
+        {/* 5. Hábitos */}
+        {(() => {
+          const smokingData = data.filter(r => r.smoking)
+          const thmData = data.filter(r => r.thm)
+          const alcData = data.filter(r => r.alcoholFreq && r.version === 'full')
+          if (!smokingData.length && !thmData.length && !alcData.length) return null
+
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Hábitos</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {smokingData.length > 0 && (
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>Tabaco (n={smokingData.length})</p>
+                    <HBar data={distrib(smokingData, 'smoking', SMOKING_LABELS, ['never', 'former', 'current'])} color="#F59E0B" />
+                  </div>
+                )}
+                {alcData.length > 0 && (
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>Alcohol (n={alcData.length}, solo versión completa)</p>
+                    <HBar data={distrib(alcData, 'alcoholFreq', ALCOHOL_LABELS, ['never', 'monthly', 'weekly', 'daily'])} color="#8B5CF6" />
+                  </div>
+                )}
+                {thmData.length > 0 && (
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>Terapia hormonal (n={thmData.length})</p>
+                    <HBar data={distrib(thmData, 'thm', THM_LABELS, ['never', 'past', 'current'])} color="#EC4899" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* 6. Ginecología (solo full) */}
+        {(() => {
+          const fullData = data.filter(r => r.version === 'full')
+          if (!fullData.length) return null
+          const menarcheVals = fullData.filter(r => r.menarche).map(r => parseInt(r.menarche)).filter(v => !isNaN(v) && v > 0)
+          const pregnancyVals = fullData.filter(r => r.pregnancies != null).map(r => parseInt(r.pregnancies)).filter(v => !isNaN(v))
+
+          if (!menarcheVals.length && !pregnancyVals.length) return null
+
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Ginecología (versión completa, n={fullData.length})</p>
+              {menarcheVals.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                    Edad menarquia: media {avg(menarcheVals).toFixed(1)} (SD {sd(menarcheVals).toFixed(1)})
+                  </p>
+                  <ResponsiveContainer width="100%" height={120}>
+                    <BarChart data={histogram(menarcheVals, 1, 9, 18)}>
+                      <XAxis dataKey="label" fontSize={10} tick={{ fill: "#94A3B8" }} />
+                      <YAxis fontSize={10} tick={{ fill: "#94A3B8" }} allowDecimals={false} hide />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="#EC4899" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {pregnancyVals.length > 0 && (
+                <div>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+                    Embarazos: media {avg(pregnancyVals).toFixed(1)} (SD {sd(pregnancyVals).toFixed(1)})
+                  </p>
+                  <ResponsiveContainer width="100%" height={120}>
+                    <BarChart data={histogram(pregnancyVals, 1, 0, 7)}>
+                      <XAxis dataKey="label" fontSize={10} tick={{ fill: "#94A3B8" }} />
+                      <YAxis fontSize={10} tick={{ fill: "#94A3B8" }} allowDecimals={false} hide />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="#7CC8A8" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          )
+        })()}
       </>}
 
       {/* ═══ TAB: DOMINIOS ═══ */}
@@ -657,6 +1092,240 @@ export default function Dashboard({ onBack }) {
         </div>
       </>}
 
+      {/* ═══ TAB: IPAQ ═══ */}
+      {tab === 'ipaq' && <>
+        {/* 1. Distribución de categorías IPAQ */}
+        {(() => {
+          const ipaqData = data.filter(r => r.ipaqCat)
+          if (!ipaqData.length) return (
+            <div style={card}>
+              <p style={sectionTitle}>IPAQ — Actividad física</p>
+              <p style={{ fontSize: 13, color: '#94A3B8' }}>No hay datos IPAQ disponibles. Los datos IPAQ se recogen en las versiones completa y rápida del cuestionario.</p>
+            </div>
+          )
+          const catDist = distrib(ipaqData, 'ipaqCat', IPAQ_LABELS, IPAQ_ORDER)
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Distribución de categorías IPAQ (n={ipaqData.length})</p>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={catDist}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="label" fontSize={12} tick={{ fill: '#64748B' }} />
+                  <YAxis fontSize={10} tick={{ fill: '#94A3B8' }} allowDecimals={false} />
+                  <Tooltip formatter={(val, name) => [val, 'n']} />
+                  <Bar dataKey="count" name="n" radius={[4, 4, 0, 0]}>
+                    {catDist.map((d, i) => <Cell key={i} fill={IPAQ_COLORS[d.key] || '#94A3B8'} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )
+        })()}
+
+        {/* 2. Histograma MET-min/semana */}
+        {(() => {
+          const metVals = data.filter(r => r.ipaqMet != null).map(r => r.ipaqMet)
+          if (!metVals.length) return null
+          const maxMet = Math.min(Math.max(...metVals), 10000)
+          const binSize = maxMet > 5000 ? 1000 : maxMet > 2000 ? 500 : 250
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Distribución de MET-min/semana (n={metVals.length})</p>
+              <p style={{ fontSize: 11, color: '#94A3B8', marginBottom: 8 }}>
+                Media: {avg(metVals).toFixed(0)} | Mediana: {[...metVals].sort((a, b) => a - b)[Math.floor(metVals.length / 2)]} | SD: {sd(metVals).toFixed(0)}
+              </p>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={histogram(metVals.map(v => Math.min(v, maxMet)), binSize, 0, maxMet + binSize)}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="label" fontSize={9} tick={{ fill: '#94A3B8' }} angle={-30} textAnchor="end" height={40} />
+                  <YAxis fontSize={10} tick={{ fill: '#94A3B8' }} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="n" fill="#22C55E" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )
+        })()}
+
+        {/* 3. Sedentarismo */}
+        {(() => {
+          const sittingVals = data.filter(r => r.ipaqSitting != null).map(r => r.ipaqSitting)
+          if (!sittingVals.length) return null
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Sedentarismo — minutos sentada/día (n={sittingVals.length})</p>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+                <Kpi label="Media" value={`${avg(sittingVals).toFixed(0)} min`} />
+                <Kpi label="SD" value={`${sd(sittingVals).toFixed(0)} min`} />
+                <Kpi label="Horas/día" value={(avg(sittingVals) / 60).toFixed(1)} />
+              </div>
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={histogram(sittingVals, 60, 0, 720)}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="label" fontSize={9} tick={{ fill: '#94A3B8' }} />
+                  <YAxis fontSize={10} tick={{ fill: '#94A3B8' }} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="n" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )
+        })()}
+
+        {/* 4. IPAQ por grupo de edad */}
+        {(() => {
+          const ipaqData = data.filter(r => r.ipaqCat && r.age)
+          if (!ipaqData.length) return null
+          const rows = AGE_GROUPS.map(g => {
+            const gd = ipaqData.filter(r => getAgeGroup(r.age) === g)
+            if (!gd.length) return null
+            return {
+              group: g, n: gd.length,
+              low: gd.filter(r => r.ipaqCat === 'low').length,
+              moderate: gd.filter(r => r.ipaqCat === 'moderate').length,
+              high: gd.filter(r => r.ipaqCat === 'high').length,
+            }
+          }).filter(Boolean)
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>IPAQ por grupo de edad</p>
+              <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #E2E8F0' }}>
+                    <th style={{ textAlign: 'left', padding: 6, color: '#475569' }}>Grupo</th>
+                    <th style={{ textAlign: 'right', padding: 6, color: '#475569' }}>n</th>
+                    <th style={{ textAlign: 'right', padding: 6, color: '#EF4444' }}>Bajo</th>
+                    <th style={{ textAlign: 'right', padding: 6, color: '#F59E0B' }}>Moderado</th>
+                    <th style={{ textAlign: 'right', padding: 6, color: '#22C55E' }}>Alto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.group} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                      <td style={{ padding: 6, fontWeight: 600 }}>{r.group}</td>
+                      <td style={{ padding: 6, textAlign: 'right', color: '#94A3B8' }}>{r.n}</td>
+                      <td style={{ padding: 6, textAlign: 'right' }}>{r.low} ({(r.low / r.n * 100).toFixed(0)}%)</td>
+                      <td style={{ padding: 6, textAlign: 'right' }}>{r.moderate} ({(r.moderate / r.n * 100).toFixed(0)}%)</td>
+                      <td style={{ padding: 6, textAlign: 'right' }}>{r.high} ({(r.high / r.n * 100).toFixed(0)}%)</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
+
+        {/* 5. Score MENQOL global por categoría IPAQ */}
+        {(() => {
+          const ipaqData = data.filter(r => r.ipaqCat)
+          if (!ipaqData.length) return null
+          const chartData = IPAQ_ORDER.map(cat => {
+            const subset = ipaqData.filter(r => r.ipaqCat === cat)
+            if (!subset.length) return null
+            return {
+              name: IPAQ_LABELS[cat],
+              key: cat,
+              Global: +avg(subset.map(r => r.score_global)).toFixed(2),
+              n: subset.length,
+            }
+          }).filter(Boolean)
+          return (
+            <div style={card}>
+              <p style={sectionTitle}>Score MENQOL global por categoría IPAQ</p>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="name" fontSize={12} tick={{ fill: '#64748B' }} />
+                  <YAxis domain={[0, 8]} fontSize={10} tick={{ fill: '#94A3B8' }} />
+                  <Tooltip formatter={(val) => [val.toFixed(2), 'Score global']} />
+                  <Bar dataKey="Global" radius={[4, 4, 0, 0]}>
+                    {chartData.map((d, i) => <Cell key={i} fill={IPAQ_COLORS[d.key] || '#94A3B8'} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 8 }}>
+                {chartData.map(d => (
+                  <span key={d.name} style={{ fontSize: 11, color: '#64748B' }}>{d.name}: {d.Global} (n={d.n})</span>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+      </>}
+
+      {/* ═══ TAB: ANÁLISIS ═══ */}
+      {tab === 'analisis' && <>
+        <div style={{ ...card, padding: '12px 14px', marginBottom: 14, background: '#F8FAFC' }}>
+          <p style={{ fontSize: 12, color: '#64748B', lineHeight: 1.5 }}>
+            Análisis cruzado de puntuaciones MENQOL estratificadas por variables clínicas.
+            Se muestran medias por dominio y score global para cada grupo.
+          </p>
+        </div>
+
+        {/* 1. MENQOL por etapa reproductiva */}
+        <CrossTab
+          title="MENQOL por etapa reproductiva"
+          enriched={data}
+          groups={STAGE_ORDER.filter(s => s !== 'unknown').map(s => ({
+            label: STAGE_LABELS[s],
+            filter: r => r.stage === s,
+          }))}
+        />
+
+        {/* 2. MENQOL por categoría IPAQ */}
+        <CrossTab
+          title="MENQOL por categoría IPAQ"
+          enriched={data}
+          groups={IPAQ_ORDER.map(c => ({
+            label: IPAQ_LABELS[c],
+            filter: r => r.ipaqCat === c,
+          }))}
+        />
+
+        {/* 3. MENQOL por uso de THM */}
+        <CrossTab
+          title="MENQOL por terapia hormonal (THM)"
+          enriched={data}
+          groups={[
+            { label: 'Nunca', filter: r => r.thm === 'never' },
+            { label: 'Pasado', filter: r => r.thm === 'past' },
+            { label: 'Actual', filter: r => r.thm === 'current' },
+          ]}
+        />
+
+        {/* 4. MENQOL por depresión */}
+        <CrossTab
+          title="MENQOL por depresión"
+          enriched={data}
+          groups={[
+            { label: 'No', filter: r => r.depression === 'no' || r.depression === false },
+            { label: 'Pasada', filter: r => r.depression === 'past' },
+            { label: 'Actual', filter: r => r.depression === 'current' || r.depression === true },
+          ]}
+        />
+
+        {/* 5. MENQOL por tabaco */}
+        <CrossTab
+          title="MENQOL por tabaco"
+          enriched={data}
+          groups={[
+            { label: 'Nunca', filter: r => r.smoking === 'never' },
+            { label: 'Exfumadora', filter: r => r.smoking === 'former' },
+            { label: 'Fumadora activa', filter: r => r.smoking === 'current' },
+          ]}
+        />
+
+        {/* 6. MENQOL por categoría IMC */}
+        <CrossTab
+          title="MENQOL por categoría de IMC"
+          enriched={data}
+          groups={BMI_CATS.map(cat => ({
+            label: cat,
+            filter: r => r.bmiCat === cat,
+          }))}
+        />
+      </>}
+
       {/* ═══ TAB: POR EDAD ═══ */}
       {tab === 'edad' && <>
         <div style={card}>
@@ -741,7 +1410,7 @@ function GestionTab({ data, onClear, onExport, onRefresh, user, onDeleteByCode }
   const [deleteText, setDeleteText] = useState("")
   const [deleting, setDeleting] = useState(false)
   const [codeSearch, setCodeSearch] = useState("")
-  const [codeResult, setCodeResult] = useState(null) // null | { found, record } | "searching" | "deleted"
+  const [codeResult, setCodeResult] = useState(null)
   const [codeDeleting, setCodeDeleting] = useState(false)
   const [auditLogs, setAuditLogs] = useState([])
   const [showAudit, setShowAudit] = useState(false)
@@ -805,6 +1474,10 @@ function GestionTab({ data, onClear, onExport, onRefresh, user, onDeleteByCode }
         <p style={{ fontSize: 13, color: "#64748B", marginBottom: 12, lineHeight: 1.5 }}>
           Exporta todos los datos filtrados ({data.length} respuestas) como CSV
           compatible con Excel, SPSS y R. Separador: punto y coma. Codificación UTF-8.
+          <br />
+          <span style={{ fontSize: 11, color: '#94A3B8' }}>
+            Incluye: datos demográficos, IMC, etapa reproductiva, hábitos, IPAQ, y 29 ítems MENQOL.
+          </span>
         </p>
         <button onClick={onExport} style={{
           padding: "10px 20px", borderRadius: 10, background: "#1E293B",
@@ -890,7 +1563,7 @@ function GestionTab({ data, onClear, onExport, onRefresh, user, onDeleteByCode }
             background: "#F0FDF4", borderRadius: 10, padding: 12,
             border: "1px solid #BBF7D0", fontSize: 13, color: "#166534", fontWeight: 600
           }}>
-            ✅ Respuesta eliminada correctamente. Los datos han sido suprimidos de la base de datos.
+            Respuesta eliminada correctamente. Los datos han sido suprimidos de la base de datos.
           </div>
         )}
       </div>

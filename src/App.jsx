@@ -1154,10 +1154,10 @@ export default function App() {
         {step !== "dashboard" && (
           <div style={{ padding: "20px 0 16px", textAlign: "center" }}>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: "#1E293B", letterSpacing: "-0.3px" }}>
-              Cuestionario MENQOL
+              Estudio Menopausia y Salud
             </h1>
             <p style={{ fontSize: 13, color: "#94A3B8", marginTop: 4 }}>
-              Calidad de vida en la menopausia
+              Calidad de vida, actividad física y factores de salud
             </p>
           </div>
         )}
@@ -1172,32 +1172,34 @@ export default function App() {
             }}>
               <div style={{ fontSize: 48, textAlign: "center", marginBottom: 16 }}>🌸</div>
               <h2 style={{ fontSize: 20, fontWeight: 700, color: "#1E293B", textAlign: "center", marginBottom: 12, lineHeight: 1.3 }}>
-                Evalúa tu calidad de vida durante la menopausia
+                Estudio integral sobre menopausia y salud
               </h2>
               <p style={{ fontSize: 14, color: "#64748B", lineHeight: 1.7, textAlign: "center", marginBottom: 20 }}>
                 Estudio de investigación de la Universidad Politécnica de Madrid (UPM) en colaboración con Cuerpos Serranos.
-                Este cuestionario te ayudará a identificar cómo los síntomas de la menopausia afectan tu día a día.
+                Evalúa tu calidad de vida, actividad física y factores de salud asociados a la menopausia.
               </p>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-                {DOMAINS.map(d => (
-                  <div key={d.id} style={{
-                    background: d.colorLight, borderRadius: 12, padding: "12px 10px", textAlign: "center"
+                {[
+                  { emoji: "🌸", label: "MENQOL", sub: "29 síntomas", bg: "#FFF1F2", color: "#E8927C" },
+                  { emoji: "🏃‍♀️", label: "Actividad física", sub: "IPAQ", bg: "#F0FDF4", color: "#22C55E" },
+                  { emoji: "🩺", label: "Salud y hábitos", sub: "Antecedentes", bg: "#EEF2FF", color: "#7C9CE8" },
+                  { emoji: "👩‍⚕️", label: "Ginecología", sub: "Etapa reproductiva", bg: "#FDF4FF", color: "#9C7CE8" },
+                ].map(d => (
+                  <div key={d.label} style={{
+                    background: d.bg, borderRadius: 12, padding: "12px 10px", textAlign: "center"
                   }}>
                     <span style={{ fontSize: 22 }}>{d.emoji}</span>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: d.color, marginTop: 4, lineHeight: 1.3 }}>{d.name}</p>
-                    <p style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>{d.items.length} ítems</p>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: d.color, marginTop: 4, lineHeight: 1.3 }}>{d.label}</p>
+                    <p style={{ fontSize: 11, color: "#94A3B8", marginTop: 2 }}>{d.sub}</p>
                   </div>
                 ))}
               </div>
               <div style={{ background: "#F8FAFC", borderRadius: 12, padding: 14 }}>
                 <p style={{ fontSize: 13, color: "#64748B", lineHeight: 1.6 }}>
-                  📋 29 preguntas MENQOL sobre el <strong>último mes</strong><br/>
-                  🔢 Escala <strong>0-6</strong> (0 = no me molesta, 6 = muchísimo)<br/>
-                  ❓ Pulsa <strong style={{
-                    display: "inline-flex", width: 18, height: 18, borderRadius: "50%",
-                    border: "1.5px solid #CBD5E1", alignItems: "center", justifyContent: "center",
-                    fontSize: 11, color: "#64748B", verticalAlign: "middle", margin: "0 2px"
-                  }}>?</strong> en cada pregunta para más detalle
+                  🌸 <strong>MENQOL</strong>: 29 preguntas sobre síntomas del último mes<br/>
+                  🏃‍♀️ <strong>IPAQ</strong>: actividad física de los últimos 7 días<br/>
+                  🩺 <strong>Salud</strong>: demografía, hábitos, antecedentes clínicos<br/>
+                  🔒 Datos <strong>anónimos</strong> y protegidos (RGPD)
                 </p>
               </div>
             </div>
